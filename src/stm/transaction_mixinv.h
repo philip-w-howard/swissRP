@@ -1,3 +1,10 @@
+//PWH: add first_value to write log. Final stores come out of that value
+//PWH: when adding log values, conditionally update the first entry as done now
+//PWH: then UNconditionally add a new entry. That we every STORE will be 
+//PWH: separately recorded in the log.
+//PWH:
+//PWH: Need some way to store "Grace Period" in the log
+
 /**
  * @author Aleksandar Dragojevic aleksandar.dragojevic@epfl.ch
  *
@@ -914,6 +921,7 @@ inline wlpdstm::TxMixinv::RestartCause wlpdstm::TxMixinv::TxTryCommit() {
 			// now update actual values
 			WriteWordLogEntry *word_log_entry = entry.head;
 
+//PWH: This is where the actual updates take place
 			while(word_log_entry != NULL) {
 				*word_log_entry->address = MaskWord(word_log_entry);
 				word_log_entry = word_log_entry->next;
@@ -1195,6 +1203,7 @@ inline wlpdstm::TxMixinv::WriteWordLogEntry *wlpdstm::TxMixinv::WriteLogEntry::F
 inline void wlpdstm::TxMixinv::WriteLogEntry::InsertWordLogEntry(Word *address, Word value, Word mask) {
 	WriteWordLogEntry *entry = FindWordLogEntry(address);
 
+//PWH: this is where the update entries get made
 	// new entry
 	if(entry == NULL) {
 		entry = owner->write_word_log_mem_pool.get_next();
@@ -1253,7 +1262,8 @@ inline Word wlpdstm::TxMixinv::ReadWordInner(Word *address) {
 	if(LockedByMe(log_entry)) {
 		WriteLogEntry *log_entry = (WriteLogEntry *)*write_lock;
 		WriteWordLogEntry *word_log_entry = log_entry->FindWordLogEntry(address);
-		
+
+//PWH: This is where the read actually happens		
 		if(word_log_entry != NULL) {
 			// if it was written return from log
 			return MaskWord(word_log_entry);
@@ -1281,6 +1291,7 @@ inline Word wlpdstm::TxMixinv::ReadWordInner(Word *address) {
 			continue;
 		}
 
+//PWH: This is where the read actually happens		
 		value = (Word)atomic_load_acquire(address);
 		VersionLock version_2 = (VersionLock)atomic_load_acquire(read_lock);
 
