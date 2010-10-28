@@ -1,6 +1,6 @@
 include Makefile.in
 
-CPPFLAGS += -DUSE_STANDARD_IOSTREAM # -g -O0
+CPPFLAGS += -DUSE_STANDARD_IOSTREAM -DRP_STM # -g -O0
 
 OBJFILES = $(OBJ_DIR)/tid.o $(OBJ_DIR)/wlpdstm.o $(OBJ_DIR)/transaction.o $(OBJ_DIR)/privatization_tree.o
 

@@ -1,8 +1,3 @@
-//PWH: add first_value to write log. Final stores come out of that value
-//PWH: when adding log values, conditionally update the first entry as done now
-//PWH: then UNconditionally add a new entry. That we every STORE will be 
-//PWH: separately recorded in the log.
-//PWH:
 //PWH: Need some way to store "Grace Period" in the log
 
 /**
@@ -105,20 +100,15 @@ namespace wlpdstm {
 			WriteWordLogEntry *next;
 		};
 
-        //PWH: do-log structures
-        typedef struct do_log_entry_s
+#ifdef RP_STM
+        typedef struct
         {
             Word *address;
             Word value;
-            struct do_log_entry_s *next;
         } do_log_entry_t;
 
-        typedef struct
-        {
-            do_log_entry_t *first;
-            do_log_entry_t *last;
-        } do_log_t;
-        // PWH: end
+		typedef Log<do_log_entry_t> DoLog;
+#endif
 
 		static const Word LOG_ENTRY_UNMASKED = ~0x0;
 		
@@ -465,12 +455,12 @@ namespace wlpdstm {
 		// local
 		WriteLog write_log;
 		
-        //PWH: do-log structures
-        do_log_t do_log;
+#ifdef RP_STM
+        DoLog do_log;
 
         void do_log_add(Word *address, Word value);
         void do_log_execute();
-        void do_log_delete();
+#endif
 
 #ifdef SUPPORT_LOCAL_WRITES
 		// local
@@ -855,13 +845,6 @@ inline void wlpdstm::TxMixinv::TxStart(int lex_tx_id) {
 #ifdef SIGNALING
 	ClearSignals();
 #endif /* SIGNALING */	
-    //PWH: init the do-log
-    do_log_entry_t *dummy_entry = (do_log_entry_t *)malloc(sizeof(do_log_entry_t));
-    dummy_entry->address = 0;
-    dummy_entry->value = 0xBAD0BED;
-    dummy_entry->next = NULL;
-    do_log.first = dummy_entry;
-    do_log.last = dummy_entry;
 }
 
 inline Word wlpdstm::TxMixinv::IncrementCommitTs() {
@@ -890,46 +873,25 @@ inline void wlpdstm::TxMixinv::TxCommit() {
 #endif /* PERFORMANCE_COUNTING */	
 }
 
+#ifdef RP_STM
 //********************************************
 inline void wlpdstm::TxMixinv::do_log_add(Word *address, Word value)
 {
-    do_log_entry_t *entry = (do_log_entry_t *)malloc(sizeof(do_log_entry_t));
+    do_log_entry_t *entry = do_log.get_next();
     entry->address = address;
     entry->value = value;
-    entry->next = NULL;
-
-    do_log.last->next = entry;
-    do_log.last = entry;
 }
 inline void wlpdstm::TxMixinv::do_log_execute()
 {
-    do_log_entry_t *entry = do_log.first->next;
-    do_log_entry_t *prev = do_log.first;
-
-    free(prev);
-    while (entry != NULL)
+    for (DoLog::iterator iter = do_log.begin(); iter.hasNext();iter.next() )
     {
-        //printf("COMMIT: %p %lld\n", entry->address, entry->value);
-        *entry->address = entry->value;
-        prev = entry;
-        entry = entry->next;
-        free(prev);
-    }
-}
-inline void wlpdstm::TxMixinv::do_log_delete()
-{
-    do_log_entry_t *entry = do_log.first->next;
-    do_log_entry_t *prev = do_log.first;
-
-    free(prev);
-    while (entry != NULL)
-    {
-        prev = entry;
-        entry = entry->next;
-        free(prev);
+        do_log_entry_t& entry = *iter;
+        *entry.address = entry.value;
+        //printf("COMMIT: %p %llX\n", entry.address, entry.value);
     }
 }
 //********************************************
+#endif
 inline wlpdstm::TxMixinv::RestartCause wlpdstm::TxMixinv::TxTryCommit() {
 	Word ts = valid_ts;
 	bool read_only = write_log.empty();
@@ -984,19 +946,21 @@ inline wlpdstm::TxMixinv::RestartCause wlpdstm::TxMixinv::TxTryCommit() {
 		VersionLock commitVersion = get_version_lock(ts);
 		
 		// now update all written values
-//PWH: This is where the actual updates take place
+#ifdef RP_STM
         do_log_execute();
+#endif
 		for(WriteLog::iterator iter = write_log.begin();iter.hasNext();iter.next()) {
 			WriteLogEntry &entry = *iter;
 			
+#ifndef RP_STM
 			// now update actual values
 			WriteWordLogEntry *word_log_entry = entry.head;
 
-//PWH: This is where the actual updates take place
 			while(word_log_entry != NULL) {
-				//*word_log_entry->address = MaskWord(word_log_entry);
+				*word_log_entry->address = MaskWord(word_log_entry);
 				word_log_entry = word_log_entry->next;
 			}
+#endif
 
 			// release locks
 			atomic_store_release(entry.read_lock, commitVersion);
@@ -1026,6 +990,9 @@ inline wlpdstm::TxMixinv::RestartCause wlpdstm::TxMixinv::TxTryCommit() {
 	if(!read_only) {
 		write_log.clear();
 		write_word_log_mem_pool.clear();
+#ifdef RP_STM
+        do_log.clear();
+#endif
 	}
 
 	read_log.clear();
@@ -1064,7 +1031,9 @@ inline void wlpdstm::TxMixinv::Rollback() {
 
 	rolled_back = true;
 
-    do_log_delete();
+#ifdef RP_STM
+    do_log.clear();
+#endif
 
 #ifdef SUPPORT_LOCAL_WRITES
 	// rollback local writes
@@ -1276,8 +1245,9 @@ inline wlpdstm::TxMixinv::WriteWordLogEntry *wlpdstm::TxMixinv::WriteLogEntry::F
 inline void wlpdstm::TxMixinv::WriteLogEntry::InsertWordLogEntry(Word *address, Word value, Word mask) {
 	WriteWordLogEntry *entry = FindWordLogEntry(address);
 
-//PWH: this is where the update entries get made
+#ifdef RP_STM
     owner->do_log_add(address, value);
+#endif
 
 	// new entry
 	if(entry == NULL) {
@@ -1338,7 +1308,6 @@ inline Word wlpdstm::TxMixinv::ReadWordInner(Word *address) {
 		WriteLogEntry *log_entry = (WriteLogEntry *)*write_lock;
 		WriteWordLogEntry *word_log_entry = log_entry->FindWordLogEntry(address);
 
-//PWH: This is where the read actually happens		
 		if(word_log_entry != NULL) {
 			// if it was written return from log
 			return MaskWord(word_log_entry);
@@ -1366,7 +1335,6 @@ inline Word wlpdstm::TxMixinv::ReadWordInner(Word *address) {
 			continue;
 		}
 
-//PWH: This is where the read actually happens		
 		value = (Word)atomic_load_acquire(address);
 		VersionLock version_2 = (VersionLock)atomic_load_acquire(read_lock);
 
