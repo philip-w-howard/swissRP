@@ -53,6 +53,12 @@ void wlpdstm_write_word(Word *address, Word value) {
 	wlpdstm::CurrentTransaction::WriteWord(address, value);
 }
 
+#ifdef RP_STM
+void wlpdstm_grace_period(void *rp_context) {
+    wlpdstm::CurrentTransaction::GracePeriod(rp_context);
+}
+#endif
+
 #ifdef SUPPORT_LOCAL_WRITES
 void wlpdstm_write_word_local(Word *address, Word value) {
 	wlpdstm::CurrentTransaction::WriteWordLocal(address, value);

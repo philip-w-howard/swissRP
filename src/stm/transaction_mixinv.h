@@ -1,5 +1,3 @@
-//PWH: Need some way to store "Grace Period" in the log
-
 /**
  * @author Aleksandar Dragojevic aleksandar.dragojevic@epfl.ch
  *
@@ -105,6 +103,7 @@ namespace wlpdstm {
         {
             Word *address;
             Word value;
+            void *grace_period;
         } do_log_entry_t;
 
 		typedef Log<do_log_entry_t> DoLog;
@@ -239,6 +238,10 @@ namespace wlpdstm {
 		
 		void WriteWord(Word *address, Word val, Word mask = LOG_ENTRY_UNMASKED);
 		
+#ifdef RP_STM
+        void GracePeriod(void *rp_context);
+#endif
+
 #ifdef SUPPORT_LOCAL_WRITES
 		void WriteWordLocal(Word *address, Word val);
 #endif /* SUPPORT_LOCAL_WRITES */
@@ -875,20 +878,37 @@ inline void wlpdstm::TxMixinv::TxCommit() {
 
 #ifdef RP_STM
 //********************************************
+extern "C" {
+void rp_wait_grace_period(void *rp_context);
+}
+
 inline void wlpdstm::TxMixinv::do_log_add(Word *address, Word value)
 {
     do_log_entry_t *entry = do_log.get_next();
     entry->address = address;
     entry->value = value;
+    entry->grace_period = NULL;
 }
 inline void wlpdstm::TxMixinv::do_log_execute()
 {
     for (DoLog::iterator iter = do_log.begin(); iter.hasNext();iter.next() )
     {
         do_log_entry_t& entry = *iter;
-        *entry.address = entry.value;
-        //printf("COMMIT: %p %llX\n", entry.address, entry.value);
+        if (entry.grace_period == NULL)
+        {
+            *entry.address = entry.value;
+            //printf("COMMIT: %p %llX\n", entry.address, entry.value);
+        } else {
+            rp_wait_grace_period(entry.grace_period);
+        }
     }
+}
+inline void wlpdstm::TxMixinv::GracePeriod(void *rp_context)
+{
+    do_log_entry_t *entry = do_log.get_next();
+    entry->address = 0;
+    entry->value = 0;
+    entry->grace_period = rp_context;
 }
 //********************************************
 #endif
@@ -1031,10 +1051,6 @@ inline void wlpdstm::TxMixinv::Rollback() {
 
 	rolled_back = true;
 
-#ifdef RP_STM
-    do_log.clear();
-#endif
-
 #ifdef SUPPORT_LOCAL_WRITES
 	// rollback local writes
 	for(WriteLocalLog::iterator iter = write_local_log.begin();iter.hasNext();iter.next()) {
@@ -1056,6 +1072,10 @@ inline void wlpdstm::TxMixinv::Rollback() {
 	write_local_log.clear();
 #endif /* SUPPORT_LOCAL_WRITES */
 	write_word_log_mem_pool.clear();
+
+#ifdef RP_STM
+    do_log.clear();
+#endif
 	
 	YieldCPU();
 	
