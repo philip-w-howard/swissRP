@@ -55,6 +55,10 @@ namespace wlpdstm {
 			}
 
 #ifdef RP_STM
+			static void WriteWord_mb(Word *address, Word value) {
+				Tls<Transaction, true, true>::Get()->WriteWord_mb(address, value);
+			}
+
             static void GracePeriod(void *rp_context) {
                 Tls<Transaction, true, true>::Get()->GracePeriod(rp_context);
             }

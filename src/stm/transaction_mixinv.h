@@ -104,6 +104,7 @@ namespace wlpdstm {
             Word *address;
             Word value;
             void *grace_period;
+            bool mem_barrier;
         } do_log_entry_t;
 
 		typedef Log<do_log_entry_t> DoLog;
@@ -132,6 +133,9 @@ namespace wlpdstm {
 			
 			// methods
 			void InsertWordLogEntry(Word *address, Word value, Word mask);
+#ifdef RP_STM
+			void InsertWordLogEntry_mb(Word *address, Word value, Word mask);
+#endif
 			
 //			void InsertWordLogEntryMasked(Word *address, Word value, Word mask);
 			
@@ -239,6 +243,7 @@ namespace wlpdstm {
 		void WriteWord(Word *address, Word val, Word mask = LOG_ENTRY_UNMASKED);
 		
 #ifdef RP_STM
+		void WriteWord_mb(Word *address, Word val, Word mask = LOG_ENTRY_UNMASKED);
         void GracePeriod(void *rp_context);
 #endif
 
@@ -265,6 +270,9 @@ namespace wlpdstm {
 		
 	private:
 		void WriteWordInner(Word *address, Word val, Word mask);
+#ifdef RP_STM
+		void WriteWordInner_mb(Word *address, Word val, Word mask);
+#endif
 
 		Word ReadWordInner(Word *address);
 		
@@ -461,7 +469,7 @@ namespace wlpdstm {
 #ifdef RP_STM
         DoLog do_log;
 
-        void do_log_add(Word *address, Word value);
+        void do_log_add(Word *address, Word value, bool mem_barrier);
         void do_log_execute();
 #endif
 
@@ -882,12 +890,13 @@ extern "C" {
 void rp_wait_grace_period(void *rp_context);
 }
 
-inline void wlpdstm::TxMixinv::do_log_add(Word *address, Word value)
+inline void wlpdstm::TxMixinv::do_log_add(Word *address, Word value, bool mem_barrier)
 {
     do_log_entry_t *entry = do_log.get_next();
     entry->address = address;
     entry->value = value;
     entry->grace_period = NULL;
+    entry->mem_barrier = mem_barrier;
 }
 inline void wlpdstm::TxMixinv::do_log_execute()
 {
@@ -897,6 +906,7 @@ inline void wlpdstm::TxMixinv::do_log_execute()
         if (entry.grace_period == NULL)
         {
             *entry.address = entry.value;
+            if (entry.mem_barrier) AO_nop_full();
             //printf("COMMIT: %p %llX\n", entry.address, entry.value);
         } else {
             rp_wait_grace_period(entry.grace_period);
@@ -1236,6 +1246,30 @@ inline void wlpdstm::TxMixinv::WriteWordInner(Word *address, Word value, Word ma
 	log_entry->InsertWordLogEntry(address, value, mask);
 }
 
+#ifdef RP_STM
+inline void wlpdstm::TxMixinv::WriteWord_mb(Word *address, Word value, Word mask) {
+#ifdef STACK_PROTECT_ON_WRITE
+	if(OnStack((uintptr_t)address)) {
+		*address = MaskWord(*address, value, mask);
+	} else {
+		WriteWordInner_mb(address, value, mask);
+	}
+#else
+	WriteWordInner_mb(address, value, mask);
+#endif /* STACK_PROTECT_ON_WRITE */
+}
+
+inline void wlpdstm::TxMixinv::WriteWordInner_mb(Word *address, Word value, Word mask) {
+	// map address to the lock
+	VersionLock *write_lock = map_address_to_write_lock(address);
+	
+	// try to lock the address - it will abort if address cannot be locked
+	WriteLogEntry *log_entry = LockMemoryStripe(write_lock, address);
+	
+	// insert (address, value) pair into the log
+	log_entry->InsertWordLogEntry_mb(address, value, mask);
+}
+#endif // RP_STM
 #ifdef SUPPORT_LOCAL_WRITES
 inline void wlpdstm::TxMixinv::WriteWordLocal(Word *address, Word val) {
 	WriteWordLocalLogEntry *log_entry = write_local_log.get_next();
@@ -1266,7 +1300,7 @@ inline void wlpdstm::TxMixinv::WriteLogEntry::InsertWordLogEntry(Word *address, 
 	WriteWordLogEntry *entry = FindWordLogEntry(address);
 
 #ifdef RP_STM
-    owner->do_log_add(address, value);
+    owner->do_log_add(address, value, false);
 #endif
 
 	// new entry
@@ -1282,6 +1316,27 @@ inline void wlpdstm::TxMixinv::WriteLogEntry::InsertWordLogEntry(Word *address, 
 		entry->mask |= mask;
 	}
 }
+
+#ifdef RP_STM
+inline void wlpdstm::TxMixinv::WriteLogEntry::InsertWordLogEntry_mb(Word *address, Word value, Word mask) {
+	WriteWordLogEntry *entry = FindWordLogEntry(address);
+
+    owner->do_log_add(address, value, true);
+
+	// new entry
+	if(entry == NULL) {
+		entry = owner->write_word_log_mem_pool.get_next();
+		entry->address = address;
+		entry->next = head;
+		entry->value = value;
+		entry->mask = mask;
+		head = entry;
+	} else {
+		entry->value = MaskWord(entry->value, value, mask);
+		entry->mask |= mask;
+	}
+}
+#endif
 
 // mask contains ones where value bits are valid
 inline Word wlpdstm::TxMixinv::MaskWord(Word old, Word val, Word mask) {
