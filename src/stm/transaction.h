@@ -62,6 +62,10 @@ namespace wlpdstm {
             static void GracePeriod(void *rp_context) {
                 Tls<Transaction, true, true>::Get()->GracePeriod(rp_context);
             }
+
+            static void RPFree(void *rp_context, void *address) {
+                Tls<Transaction, true, true>::Get()->RPFree(rp_context, address);
+            }
 #endif
 			static void WriteWord(Word *address, Word value) {
 				Tls<Transaction, true, true>::Get()->WriteWord(address, value);

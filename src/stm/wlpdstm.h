@@ -47,6 +47,7 @@ extern "C" {
 
 #ifdef RP_STM
 	void wlpdstm_write_word_mb(Word *address, Word value);
+    void wlpdstm_rp_free(void *rp_context, void *address);
     void wlpdstm_grace_period(void *rp_contect);
 #endif
 

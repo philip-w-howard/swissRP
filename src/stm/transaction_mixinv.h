@@ -99,12 +99,14 @@ namespace wlpdstm {
 		};
 
 #ifdef RP_STM
+        enum RP_Action {WRITE, WRITE_MB, GP, FREE};
+
         typedef struct
         {
             Word *address;
             Word value;
-            void *grace_period;
-            bool mem_barrier;
+            void *context;
+            RP_Action action;
         } do_log_entry_t;
 
 		typedef Log<do_log_entry_t> DoLog;
@@ -244,6 +246,7 @@ namespace wlpdstm {
 		
 #ifdef RP_STM
 		void WriteWord_mb(Word *address, Word val, Word mask = LOG_ENTRY_UNMASKED);
+	    void RPFree(void *rp_context, void *address);
         void GracePeriod(void *rp_context);
 #endif
 
@@ -469,7 +472,7 @@ namespace wlpdstm {
 #ifdef RP_STM
         DoLog do_log;
 
-        void do_log_add(Word *address, Word value, bool mem_barrier);
+        void do_log_add(Word *address, void *context, Word value, RP_Action action);
         void do_log_execute();
 #endif
 
@@ -888,37 +891,43 @@ inline void wlpdstm::TxMixinv::TxCommit() {
 //********************************************
 extern "C" {
 void rp_wait_grace_period(void *rp_context);
+void rp_free(void *rp_context, void *func_ptr, void *address);
 }
 
-inline void wlpdstm::TxMixinv::do_log_add(Word *address, Word value, bool mem_barrier)
+inline void wlpdstm::TxMixinv::do_log_add(Word *address, void *context, Word value, RP_Action action)
 {
     do_log_entry_t *entry = do_log.get_next();
     entry->address = address;
+    entry->context = context;
     entry->value = value;
-    entry->grace_period = NULL;
-    entry->mem_barrier = mem_barrier;
+    entry->action = action;
 }
 inline void wlpdstm::TxMixinv::do_log_execute()
 {
     for (DoLog::iterator iter = do_log.begin(); iter.hasNext();iter.next() )
     {
         do_log_entry_t& entry = *iter;
-        if (entry.grace_period == NULL)
+        switch (entry.action)
         {
-            *entry.address = entry.value;
-            if (entry.mem_barrier) AO_nop_full();
-            //printf("COMMIT: %p %llX\n", entry.address, entry.value);
-        } else {
-            rp_wait_grace_period(entry.grace_period);
+            case WRITE:
+                *entry.address = entry.value;
+                break;
+            case WRITE_MB:
+                *entry.address = entry.value;
+                AO_nop_full();
+                break;
+            case GP:
+                rp_wait_grace_period(entry.context);
+                break;
+            case FREE:
+                rp_free(entry.context, NULL, entry.address);
+                break;
         }
     }
 }
 inline void wlpdstm::TxMixinv::GracePeriod(void *rp_context)
 {
-    do_log_entry_t *entry = do_log.get_next();
-    entry->address = 0;
-    entry->value = 0;
-    entry->grace_period = rp_context;
+    do_log_add(NULL, rp_context, 0, GP);
 }
 //********************************************
 #endif
@@ -1259,6 +1268,10 @@ inline void wlpdstm::TxMixinv::WriteWord_mb(Word *address, Word value, Word mask
 #endif /* STACK_PROTECT_ON_WRITE */
 }
 
+inline void wlpdstm::TxMixinv::RPFree(void *rp_context, void *address) {
+    do_log_add((Word *)address, rp_context, 0, FREE);
+}
+
 inline void wlpdstm::TxMixinv::WriteWordInner_mb(Word *address, Word value, Word mask) {
 	// map address to the lock
 	VersionLock *write_lock = map_address_to_write_lock(address);
@@ -1300,7 +1313,7 @@ inline void wlpdstm::TxMixinv::WriteLogEntry::InsertWordLogEntry(Word *address, 
 	WriteWordLogEntry *entry = FindWordLogEntry(address);
 
 #ifdef RP_STM
-    owner->do_log_add(address, value, false);
+    owner->do_log_add(address, NULL, value, WRITE);
 #endif
 
 	// new entry
@@ -1321,7 +1334,7 @@ inline void wlpdstm::TxMixinv::WriteLogEntry::InsertWordLogEntry(Word *address, 
 inline void wlpdstm::TxMixinv::WriteLogEntry::InsertWordLogEntry_mb(Word *address, Word value, Word mask) {
 	WriteWordLogEntry *entry = FindWordLogEntry(address);
 
-    owner->do_log_add(address, value, true);
+    owner->do_log_add(address, NULL, value, WRITE_MB);
 
 	// new entry
 	if(entry == NULL) {
