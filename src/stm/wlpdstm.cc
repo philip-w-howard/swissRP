@@ -58,6 +58,10 @@ void wlpdstm_write_word_mb(Word *address, Word value) {
 	wlpdstm::CurrentTransaction::WriteWord_mb(address, value);
 }
 
+void wlpdstm_free(void *address) {
+	wlpdstm::CurrentTransaction::Free(address);
+}
+
 void wlpdstm_rp_free(void *rp_context, void *address) {
 	wlpdstm::CurrentTransaction::RPFree(rp_context, address);
 }

@@ -66,6 +66,10 @@ namespace wlpdstm {
             static void RPFree(void *rp_context, void *address) {
                 Tls<Transaction, true, true>::Get()->RPFree(rp_context, address);
             }
+
+            static void Free(void *address) {
+                Tls<Transaction, true, true>::Get()->Free(address);
+            }
 #endif
 			static void WriteWord(Word *address, Word value) {
 				Tls<Transaction, true, true>::Get()->WriteWord(address, value);

@@ -246,6 +246,7 @@ namespace wlpdstm {
 		
 #ifdef RP_STM
 		void WriteWord_mb(Word *address, Word val, Word mask = LOG_ENTRY_UNMASKED);
+	    void Free(void *address);
 	    void RPFree(void *rp_context, void *address);
         void GracePeriod(void *rp_context);
 #endif
@@ -1266,6 +1267,10 @@ inline void wlpdstm::TxMixinv::WriteWord_mb(Word *address, Word value, Word mask
 #else
 	WriteWordInner_mb(address, value, mask);
 #endif /* STACK_PROTECT_ON_WRITE */
+}
+
+inline void wlpdstm::TxMixinv::Free(void *address) {
+    mm.Free(address);
 }
 
 inline void wlpdstm::TxMixinv::RPFree(void *rp_context, void *address) {
