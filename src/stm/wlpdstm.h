@@ -45,6 +45,8 @@ extern "C" {
 
 	void wlpdstm_write_word(Word *address, Word value);
 
+    char *wlpdstm_version();
+
 #ifdef RP_STM
 	void wlpdstm_write_word_mb(Word *address, Word value);
     void wlpdstm_free(void *address);

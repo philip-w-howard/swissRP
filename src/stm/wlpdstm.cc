@@ -17,6 +17,14 @@
 
 extern "C" {
 
+char *wlpdstm_version() {
+#ifdef RP_STM
+    return "swissRP";
+#else
+    return "swissTM";
+#endif
+}
+
 void wlpdstm_global_init() {
 	wlpdstm::CurrentTransaction::GlobalInit();
 }
